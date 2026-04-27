@@ -29,26 +29,26 @@ const FRIENDS = [
     message: "Şeyma sahneye giriş yaptı ✨👑",
     effect: "hearts",
   },
+  // {
+  //   id: "onur",
+  //   name: "Onur",
+  //   images: ["/faces/onur/1.jpg", "/faces/onur/2.jpg", "/faces/onur/3.jpg"],
+  //   song: "/sounds/onur.mp3",
+  //   message: "Onur hoş geldin 😎",
+  //   effect: "hearts",
+  // },
   {
-    id: "onur",
-    name: "Onur",
-    images: ["/faces/onur/1.jpg", "/faces/onur/2.jpg", "/faces/onur/3.jpg"],
-    song: "/sounds/onur.mp3",
-    message: "Onur hoş geldin 😎",
-    effect: "hearts",
-  },
-  {
-  id: "furkan",
-  name: "Furkan",
-  images: [
-    "/faces/furkan/1.jpg",
-    "/faces/furkan/2.jpg",
-    "/faces/furkan/3.jpg",
-  ],
-  song: "/sounds/furkan.mp3",
-  sleepSong: "/sounds/furkan-alarm.mp3",
-  message: "Furkan geldi 🦄",
-  effect: "sparkles",
+    id: "furkan",
+    name: "Furkan",
+    images: [
+      "/faces/furkan/1.jpg",
+      "/faces/furkan/2.jpg",
+      "/faces/furkan/3.jpg",
+    ],
+    song: "/sounds/furkan.mp3",
+    sleepSong: "/sounds/furkan-alarm.mp3",
+    message: "HOŞGELDİN BALIMM",
+    effect: "sparkles",
   },
 ];
 
@@ -228,7 +228,9 @@ function FriendEffect({ friend }) {
   if (!friend) return null;
 
   const emojis =
-    friend.effect === "hearts"
+    friend.id === "furkan"
+      ? ["💛", "💙", "🤍", "💚", "💛", "💙", "🤍", "💚"]
+      : friend.effect === "hearts"
       ? ["💖", "💘", "💗", "💕", "💞", "✨"]
       : ["✨", "⭐", "🌟", "🦄", "💫", "🎉"];
 
@@ -307,6 +309,7 @@ export default function App() {
   const recognitionFrameRef = useRef(0);
   const lastRecognitionAtRef = useRef(0);
   const friendAudioRef = useRef(null);
+  const friendAudiosRef = useRef({});
   const friendMessageTimeoutRef = useRef(null);
   const currentFriendIdRef = useRef(null);
 
@@ -511,47 +514,47 @@ export default function App() {
   }
 
   function startAlarm() {
-  setAlarmActive(true);
+    setAlarmActive(true);
 
-  if (friendAudioRef.current) {
-    friendAudioRef.current.pause();
-    friendAudioRef.current.currentTime = 0;
+    if (friendAudioRef.current) {
+      friendAudioRef.current.pause();
+      friendAudioRef.current.currentTime = 0;
+    }
+
+    const currentFriend = FRIENDS.find(
+      (friend) => friend.id === currentFriendIdRef.current
+    );
+
+    const alarmSource =
+      currentFriend?.id === "furkan"
+        ? "/sounds/furkan-alarm.mp3"
+        : "/sounds/alarm.mp3";
+
+    if (alarmAudioRef.current) {
+      alarmAudioRef.current.pause();
+      alarmAudioRef.current.currentTime = 0;
+    }
+
+    alarmAudioRef.current = new Audio(alarmSource);
+    alarmAudioRef.current.loop = true;
+    alarmAudioRef.current.volume = 0.9;
+
+    alarmAudioRef.current
+      .play()
+      .catch((error) => console.error("Alarm müziği çalınamadı:", error));
+
+    if (navigator.vibrate) {
+      navigator.vibrate([300, 150, 300, 150, 500]);
+    }
+
+    if (!alarmIntervalRef.current) {
+      alarmIntervalRef.current = setInterval(() => {
+        if (navigator.vibrate) {
+          navigator.vibrate([250, 120, 250]);
+        }
+      }, 900);
+    }
   }
-
-  const currentFriend = FRIENDS.find(
-    (friend) => friend.id === currentFriendIdRef.current
-  );
-
-  const alarmSource =
-    currentFriend?.id === "furkan"
-      ? "/sounds/furkan-alarm.mp3"
-      : "/sounds/alarm.mp3";
-
-  if (alarmAudioRef.current) {
-    alarmAudioRef.current.pause();
-    alarmAudioRef.current.currentTime = 0;
-  }
-
-  alarmAudioRef.current = new Audio(alarmSource);
-  alarmAudioRef.current.loop = true;
-  alarmAudioRef.current.volume = 0.9;
-
-  alarmAudioRef.current
-    .play()
-    .catch((error) => console.error("Alarm müziği çalınamadı:", error));
-
-  if (navigator.vibrate) {
-    navigator.vibrate([300, 150, 300, 150, 500]);
-  }
-
-  if (!alarmIntervalRef.current) {
-    alarmIntervalRef.current = setInterval(() => {
-      if (navigator.vibrate) {
-        navigator.vibrate([250, 120, 250]);
-      }
-    }, 900);
-  }
-}
 
   function stopAlarm() {
     setAlarmActive(false);
@@ -668,6 +671,21 @@ export default function App() {
     }
   }
 
+  function prepareFriendAudios() {
+    const friendAudioMap = {};
+
+    FRIENDS.forEach((friend) => {
+      const audio = new Audio(friend.song);
+      audio.volume = 0.9;
+      audio.preload = "auto";
+      audio.load();
+
+      friendAudioMap[friend.id] = audio;
+    });
+
+    friendAudiosRef.current = friendAudioMap;
+  }
+
   function playFriendSong(friend) {
     if (!friend) return;
     if (nahActive) return;
@@ -683,8 +701,12 @@ export default function App() {
 
     currentFriendIdRef.current = friend.id;
 
-    friendAudioRef.current = new Audio(friend.song);
+    const preparedAudio = friendAudiosRef.current[friend.id];
+
+    friendAudioRef.current = preparedAudio || new Audio(friend.song);
+    friendAudioRef.current.currentTime = 0;
     friendAudioRef.current.volume = 0.9;
+
     friendAudioRef.current
       .play()
       .catch((error) => console.error("Arkadaş şarkısı çalınamadı:", error));
@@ -790,6 +812,8 @@ export default function App() {
       setIsStarting(true);
       setStarted(true);
       setStatus("Kamera izni bekleniyor...");
+
+      prepareFriendAudios();
 
       alarmAudioRef.current = new Audio("/sounds/alarm.mp3");
       alarmAudioRef.current.loop = true;
@@ -957,6 +981,11 @@ export default function App() {
         friendAudioRef.current.pause();
         friendAudioRef.current.currentTime = 0;
       }
+
+      Object.values(friendAudiosRef.current).forEach((audio) => {
+        audio.pause();
+        audio.currentTime = 0;
+      });
 
       if (nahAudioRef.current) {
         nahAudioRef.current.pause();
