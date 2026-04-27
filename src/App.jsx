@@ -38,16 +38,17 @@ const FRIENDS = [
     effect: "hearts",
   },
   {
-    id: "furkan",
-    name: "Furkan",
-    images: [
-      "/faces/furkan/1.jpg",
-      "/faces/furkan/2.jpg",
-      "/faces/furkan/3.jpg",
-    ],
-    song: "/sounds/furkan.mp3",
-    message: "Furkan geldi 🦄",
-    effect: "sparkles",
+  id: "furkan",
+  name: "Furkan",
+  images: [
+    "/faces/furkan/1.jpg",
+    "/faces/furkan/2.jpg",
+    "/faces/furkan/3.jpg",
+  ],
+  song: "/sounds/furkan.mp3",
+  sleepSong: "/sounds/furkan-alarm.mp3",
+  message: "Furkan geldi 🦄",
+  effect: "sparkles",
   },
 ];
 
@@ -254,6 +255,7 @@ function Scene({
   isPointing,
   unicornRotation,
   hideUnicorn,
+  hideEffects,
 }) {
   return (
     <Canvas camera={{ position: [0, 1.2, 5], fov: 45 }}>
@@ -272,8 +274,14 @@ function Scene({
         />
       </Suspense>
 
-      <RainbowEffect active={fistCount >= 1} handPosition={handPosition} />
-      <StarsEffect active={fistCount >= 2} handPosition={handPosition} />
+      <RainbowEffect
+        active={!hideEffects && fistCount >= 1}
+        handPosition={handPosition}
+      />
+      <StarsEffect
+        active={!hideEffects && fistCount >= 2}
+        handPosition={handPosition}
+      />
 
       <OrbitControls enableZoom={false} enablePan={false} />
     </Canvas>
@@ -302,6 +310,10 @@ export default function App() {
   const friendMessageTimeoutRef = useRef(null);
   const currentFriendIdRef = useRef(null);
 
+  const nahAudioRef = useRef(null);
+  const nahTimeoutRef = useRef(null);
+  const nahCooldownRef = useRef(0);
+
   const [cameraReady, setCameraReady] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [started, setStarted] = useState(false);
@@ -317,6 +329,8 @@ export default function App() {
 
   const [faceRecognitionReady, setFaceRecognitionReady] = useState(false);
   const [recognizedFriend, setRecognizedFriend] = useState(null);
+
+  const [nahActive, setNahActive] = useState(false);
 
   function detectFist(landmarks) {
     if (!landmarks) return false;
@@ -348,6 +362,83 @@ export default function App() {
     const pinkyFolded = landmarks[20].y > landmarks[18].y;
 
     return indexUp && middleFolded && ringFolded && pinkyFolded;
+  }
+
+  function detectNahGesture(landmarks) {
+    if (!landmarks) return false;
+
+    const indexFolded = landmarks[8].y > landmarks[6].y;
+    const middleUp = landmarks[12].y < landmarks[10].y;
+    const ringFolded = landmarks[16].y > landmarks[14].y;
+    const pinkyFolded = landmarks[20].y > landmarks[18].y;
+
+    return middleUp && indexFolded && ringFolded && pinkyFolded;
+  }
+
+  function stopAllSoundsExceptNah() {
+    if (alarmAudioRef.current) {
+      alarmAudioRef.current.pause();
+      alarmAudioRef.current.currentTime = 0;
+    }
+
+    if (friendAudioRef.current) {
+      friendAudioRef.current.pause();
+      friendAudioRef.current.currentTime = 0;
+    }
+
+    if (alarmIntervalRef.current) {
+      clearInterval(alarmIntervalRef.current);
+      alarmIntervalRef.current = null;
+    }
+
+    setAlarmActive(false);
+
+    if (navigator.vibrate) {
+      navigator.vibrate(0);
+    }
+  }
+
+  function triggerNahReaction() {
+    const now = performance.now();
+
+    if (now - nahCooldownRef.current < 4000) return;
+
+    nahCooldownRef.current = now;
+
+    stopAllSoundsExceptNah();
+
+    setNahActive(true);
+    setStatus("DENEYECEĞİNİ BİLİYORDUM TERBİYESİZ 😤");
+
+    if (nahAudioRef.current) {
+      nahAudioRef.current.pause();
+      nahAudioRef.current.currentTime = 0;
+
+      nahAudioRef.current
+        .play()
+        .catch((error) => console.error("Nah sesi çalınamadı:", error));
+    }
+
+    if (navigator.vibrate) {
+      navigator.vibrate([180, 80, 180, 80, 260]);
+    }
+
+    if (nahTimeoutRef.current) {
+      clearTimeout(nahTimeoutRef.current);
+    }
+
+    nahTimeoutRef.current = setTimeout(() => {
+      setNahActive(false);
+
+      if (nahAudioRef.current) {
+        nahAudioRef.current.pause();
+        nahAudioRef.current.currentTime = 0;
+      }
+
+      if (navigator.vibrate) {
+        navigator.vibrate(0);
+      }
+    }, 3000);
   }
 
   function getHandPosition(landmarks) {
@@ -420,27 +511,47 @@ export default function App() {
   }
 
   function startAlarm() {
-    setAlarmActive(true);
+  setAlarmActive(true);
 
-    if (alarmAudioRef.current) {
-      alarmAudioRef.current.currentTime = 0;
-      alarmAudioRef.current
-        .play()
-        .catch((error) => console.error("Alarm MP3 çalınamadı:", error));
-    }
-
-    if (navigator.vibrate) {
-      navigator.vibrate([300, 150, 300, 150, 500]);
-    }
-
-    if (!alarmIntervalRef.current) {
-      alarmIntervalRef.current = setInterval(() => {
-        if (navigator.vibrate) {
-          navigator.vibrate([250, 120, 250]);
-        }
-      }, 900);
-    }
+  if (friendAudioRef.current) {
+    friendAudioRef.current.pause();
+    friendAudioRef.current.currentTime = 0;
   }
+
+  const currentFriend = FRIENDS.find(
+    (friend) => friend.id === currentFriendIdRef.current
+  );
+
+  const alarmSource =
+    currentFriend?.id === "furkan"
+      ? "/sounds/furkan-alarm.mp3"
+      : "/sounds/alarm.mp3";
+
+  if (alarmAudioRef.current) {
+    alarmAudioRef.current.pause();
+    alarmAudioRef.current.currentTime = 0;
+  }
+
+  alarmAudioRef.current = new Audio(alarmSource);
+  alarmAudioRef.current.loop = true;
+  alarmAudioRef.current.volume = 0.9;
+
+  alarmAudioRef.current
+    .play()
+    .catch((error) => console.error("Alarm müziği çalınamadı:", error));
+
+  if (navigator.vibrate) {
+    navigator.vibrate([300, 150, 300, 150, 500]);
+  }
+
+  if (!alarmIntervalRef.current) {
+    alarmIntervalRef.current = setInterval(() => {
+      if (navigator.vibrate) {
+        navigator.vibrate([250, 120, 250]);
+      }
+    }, 900);
+  }
+}
 
   function stopAlarm() {
     setAlarmActive(false);
@@ -559,6 +670,7 @@ export default function App() {
 
   function playFriendSong(friend) {
     if (!friend) return;
+    if (nahActive) return;
 
     if (currentFriendIdRef.current === friend.id && friendAudioRef.current) {
       return;
@@ -579,6 +691,8 @@ export default function App() {
   }
 
   function showFriendGreeting(friend) {
+    if (nahActive) return;
+
     setRecognizedFriend(friend);
     setStatus(friend.message);
     playFriendSong(friend);
@@ -682,6 +796,10 @@ export default function App() {
       alarmAudioRef.current.volume = 0.85;
       alarmAudioRef.current.load();
 
+      nahAudioRef.current = new Audio("/sounds/nah.mp3");
+      nahAudioRef.current.volume = 0.9;
+      nahAudioRef.current.load();
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "user",
@@ -762,7 +880,7 @@ export default function App() {
         updateSleepSensor(faceResult);
       }
 
-      if (faceRecognitionReadyRef.current) {
+      if (faceRecognitionReadyRef.current && !nahActive) {
         runFaceRecognition(video);
       }
 
@@ -773,14 +891,23 @@ export default function App() {
         const detectedPointing = hands.some((hand) =>
           detectIndexPointing(hand)
         );
+        const detectedNah = hands.some((hand) => detectNahGesture(hand));
 
-        setFistCount(detectedFists);
-        setIsPointing(detectedPointing);
+        if (detectedNah) {
+          triggerNahReaction();
+        }
+
+        setFistCount(detectedNah ? 0 : detectedFists);
+        setIsPointing(detectedNah ? false : detectedPointing);
         setHandPosition(getHandPosition(hands[0]));
 
-        updateUnicornRotationFromFinger(hands[0], detectedPointing);
+        if (!detectedNah && !nahActive) {
+          updateUnicornRotationFromFinger(hands[0], detectedPointing);
+        }
 
-        if (detectedFists >= 2) {
+        if (nahActive || detectedNah) {
+          setStatus("DENEYECEĞİNİ BİLİYORDUM TERBİYESİZ 😤");
+        } else if (detectedFists >= 2) {
           setStatus("İki yumruk algılandı! Gökkuşağı + yıldızlar aktif ✨🌈");
         } else if (detectedFists === 1) {
           setStatus("Bir yumruk algılandı! Gökkuşağı aktif 🌈");
@@ -798,7 +925,9 @@ export default function App() {
         setIsPointing(false);
         previousPointAngleRef.current = null;
 
-        if (recognizedFriend) {
+        if (nahActive) {
+          setStatus("DENEYECEĞİNİ BİLİYORDUM TERBİYESİZ 😤");
+        } else if (recognizedFriend) {
           setStatus(recognizedFriend.message);
         } else if (!eyesClosed) {
           setStatus("Elini kameraya göster.");
@@ -829,12 +958,21 @@ export default function App() {
         friendAudioRef.current.currentTime = 0;
       }
 
+      if (nahAudioRef.current) {
+        nahAudioRef.current.pause();
+        nahAudioRef.current.currentTime = 0;
+      }
+
       if (alarmIntervalRef.current) {
         clearInterval(alarmIntervalRef.current);
       }
 
       if (friendMessageTimeoutRef.current) {
         clearTimeout(friendMessageTimeoutRef.current);
+      }
+
+      if (nahTimeoutRef.current) {
+        clearTimeout(nahTimeoutRef.current);
       }
 
       if (navigator.vibrate) {
@@ -844,7 +982,15 @@ export default function App() {
   }, []);
 
   return (
-    <main className={alarmActive ? "app alarm-flash" : "app"}>
+    <main
+      className={
+        alarmActive
+          ? "app alarm-flash"
+          : nahActive
+          ? "app nah-shake"
+          : "app"
+      }
+    >
       <video
         ref={videoRef}
         className="camera"
@@ -861,7 +1007,8 @@ export default function App() {
           handPosition={handPosition}
           isPointing={isPointing}
           unicornRotation={unicornRotation}
-          hideUnicorn={false}
+          hideUnicorn={nahActive}
+          hideEffects={nahActive}
         />
       </div>
 
@@ -871,12 +1018,14 @@ export default function App() {
 
         <div
           className={
-            fistCount > 0 || isPointing || recognizedFriend
+            fistCount > 0 || isPointing || recognizedFriend || nahActive
               ? "badge active"
               : "badge"
           }
         >
-          {recognizedFriend
+          {nahActive
+            ? "Yakalandın 😤"
+            : recognizedFriend
             ? `${recognizedFriend.name} tanındı ✨`
             : fistCount >= 2
             ? "2 yumruk algılandı ✨🌈"
@@ -892,7 +1041,7 @@ export default function App() {
         </div>
       </div>
 
-      {recognizedFriend && (
+      {recognizedFriend && !nahActive && (
         <>
           <div className="friend-card">
             <div className="friend-card-name">{recognizedFriend.name}</div>
@@ -903,6 +1052,18 @@ export default function App() {
 
           <FriendEffect friend={recognizedFriend} />
         </>
+      )}
+
+      {nahActive && (
+        <div className="nah-overlay">
+          <div className="nah-emoji">🖕</div>
+
+          <div className="nah-text-group">
+            <div className="nah-title">DENEYECEĞİNİ BİLİYORDUM</div>
+            <div className="nah-highlight">TERBİYESİZ 🥴</div>
+            <div className="nah-subtitle">ŞEYMA seni yargılıyor...</div>
+          </div>
+        </div>
       )}
 
       {cameraReady && (sleepProgress >= 40 || alarmActive) && (
