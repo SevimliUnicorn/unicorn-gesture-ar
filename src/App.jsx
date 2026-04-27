@@ -246,59 +246,69 @@ export default function App() {
    return `Kamera açılamadı: ${error?.name || "Bilinmeyen hata"} - ${error?.message || ""}`;
   }
 
-  async function startCamera() {
-    if (isStarting || cameraReady) return;
+async function startCamera() {
+  if (isStarting || cameraReady) return;
 
-    try {
-      setIsStarting(true);
-      setStarted(true);
-      setStatus("El algılama modeli yükleniyor...");
+  try {
+    setIsStarting(true);
+    setStarted(true);
+    setStatus("Kamera izni bekleniyor...");
 
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
-      );
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: "user",
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      audio: false,
+    });
 
-      handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "CPU",
-        },
-        runningMode: "VIDEO",
-        numHands: 2,
-      });
+    streamRef.current = stream;
 
-      setStatus("Kamera izni bekleniyor...");
+    if (!videoRef.current) return;
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "user",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
+    videoRef.current.srcObject = stream;
 
-      streamRef.current = stream;
+    await videoRef.current.play();
 
-      if (!videoRef.current) return;
+    setCameraReady(true);
+    setStatus("Kamera açıldı. El algılama modeli yükleniyor...");
 
-      videoRef.current.srcObject = stream;
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+    );
 
-      await videoRef.current.play();
+    handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+        delegate: "GPU",
+      },
+      runningMode: "VIDEO",
+      numHands: 2,
+    });
 
-      setCameraReady(true);
-      setStatus("Hazır! Tek yumruk = gökkuşağı, iki yumruk = yıldızlar ✨");
+    setStatus("Hazır! Tek yumruk = gökkuşağı, iki yumruk = yıldızlar ✨");
 
-      detectLoop();
-    } catch (error) {
-      console.error(error);
-      setStatus(getCameraErrorMessage(error));
-      setStarted(false);
-    } finally {
-      setIsStarting(false);
+    detectLoop();
+  } catch (error) {
+    console.error(error);
+
+    if (error?.name === "NotAllowedError") {
+      setStatus("Kamera izni reddedildi. Tarayıcı kamera iznini aç.");
+    } else if (error?.name === "NotFoundError") {
+      setStatus("Kamera bulunamadı.");
+    } else if (error?.name === "NotReadableError") {
+      setStatus("Kamera başka bir sekme veya uygulama tarafından kullanılıyor olabilir.");
+    } else {
+      setStatus(`Hata: ${error?.name || "Bilinmeyen hata"} - ${error?.message || ""}`);
     }
+
+    setStarted(false);
+  } finally {
+    setIsStarting(false);
   }
+}
 
   function detectLoop() {
     const video = videoRef.current;
