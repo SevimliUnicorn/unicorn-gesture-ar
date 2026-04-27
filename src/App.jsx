@@ -62,14 +62,7 @@ function Unicorn({ fistCount, handPosition }) {
 function RainbowEffect({ active, handPosition }) {
   if (!active) return null;
 
-  const colors = [
-    "#ff3b3b",
-    "#ff9f1c",
-    "#ffea00",
-    "#4ade80",
-    "#38bdf8",
-    "#8b5cf6",
-  ];
+  const colors = ["#ff3b3b", "#ff9f1c", "#ffea00", "#4ade80", "#38bdf8", "#8b5cf6"];
 
   return (
     <group position={[handPosition.x, handPosition.y - 0.15, -0.4]}>
@@ -81,11 +74,7 @@ function RainbowEffect({ active, handPosition }) {
           scale={[1 + index * 0.08, 1 + index * 0.08, 1]}
         >
           <torusGeometry args={[1.05, 0.025, 12, 80, Math.PI]} />
-          <meshStandardMaterial
-            color={color}
-            emissive={color}
-            emissiveIntensity={1.2}
-          />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.2} />
         </mesh>
       ))}
     </group>
@@ -195,11 +184,14 @@ export default function App() {
   const videoRef = useRef(null);
   const handLandmarkerRef = useRef(null);
   const animationRef = useRef(null);
+  const streamRef = useRef(null);
 
   const [cameraReady, setCameraReady] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [started, setStarted] = useState(false);
   const [fistCount, setFistCount] = useState(0);
   const [handPosition, setHandPosition] = useState({ x: 0, y: 0 });
-  const [status, setStatus] = useState("Kamera hazırlanıyor...");
+  const [status, setStatus] = useState("Başlamak için kamerayı aç.");
 
   function detectFist(landmarks) {
     if (!landmarks) return false;
@@ -236,121 +228,117 @@ export default function App() {
 
   function getCameraErrorMessage(error) {
     if (!window.isSecureContext) {
-      return "Telefon tarayıcısı kamera için HTTPS ister. Localhost bilgisayarda çalışır ama telefonda 192.168 linki kamera açmayabilir. Vercel/GitHub Pages ile HTTPS yayınlayınca açılır.";
+      return "Kamera için HTTPS gerekiyor. Vercel linkiyle açtığından emin ol.";
     }
 
     if (error?.name === "NotAllowedError") {
-      return "Kamera izni reddedildi. Tarayıcı ayarlarından kamera iznini aç.";
+      return "Kamera izni reddedildi. iPhone Ayarlar > Safari > Kamera kısmını kontrol et.";
     }
 
     if (error?.name === "NotFoundError") {
-      return "Kamera bulunamadı. Cihaz kamerasını veya kamera seçimini kontrol et.";
+      return "Kamera bulunamadı.";
     }
 
     if (error?.name === "NotReadableError") {
       return "Kamera başka bir uygulama tarafından kullanılıyor olabilir.";
     }
 
-    return "Kamera açılamadı. Kamera tuşunu, tarayıcı iznini ve HTTPS bağlantısını kontrol et.";
+    return "Kamera açılamadı. Safari kamera iznini ve bağlantının HTTPS olduğunu kontrol et.";
+  }
+
+  async function startCamera() {
+    if (isStarting || cameraReady) return;
+
+    try {
+      setIsStarting(true);
+      setStarted(true);
+      setStatus("El algılama modeli yükleniyor...");
+
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+      );
+
+      handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "CPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+      });
+
+      setStatus("Kamera izni bekleniyor...");
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+
+      if (!videoRef.current) return;
+
+      videoRef.current.srcObject = stream;
+
+      await videoRef.current.play();
+
+      setCameraReady(true);
+      setStatus("Hazır! Tek yumruk = gökkuşağı, iki yumruk = yıldızlar ✨");
+
+      detectLoop();
+    } catch (error) {
+      console.error(error);
+      setStatus(getCameraErrorMessage(error));
+      setStarted(false);
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
+  function detectLoop() {
+    const video = videoRef.current;
+    const landmarker = handLandmarkerRef.current;
+
+    if (video && landmarker && video.readyState >= 2) {
+      const result = landmarker.detectForVideo(video, performance.now());
+
+      if (result.landmarks && result.landmarks.length > 0) {
+        const hands = result.landmarks;
+
+        const detectedFists = hands.filter((hand) => detectFist(hand)).length;
+        setFistCount(detectedFists);
+
+        setHandPosition(getHandPosition(hands[0]));
+
+        if (detectedFists >= 2) {
+          setStatus("İki yumruk algılandı! Gökkuşağı + yıldızlar aktif ✨🌈");
+        } else if (detectedFists === 1) {
+          setStatus("Bir yumruk algılandı! Gökkuşağı aktif 🌈");
+        } else {
+          setStatus("Elini yumruk yaparsan gökkuşağı çıkacak 🌈");
+        }
+      } else {
+        setFistCount(0);
+        setStatus("Elini kameraya göster.");
+      }
+    }
+
+    animationRef.current = requestAnimationFrame(detectLoop);
   }
 
   useEffect(() => {
-    let isMounted = true;
-
-    async function setup() {
-      try {
-        setStatus("El algılama modeli yükleniyor...");
-
-        const vision = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
-        );
-
-        handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-            delegate: "CPU",
-          },
-          runningMode: "VIDEO",
-          numHands: 2,
-        });
-
-        setStatus("Kamera izni bekleniyor...");
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "user",
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        });
-
-        if (!isMounted) return;
-
-        videoRef.current.srcObject = stream;
-
-        videoRef.current.onloadedmetadata = async () => {
-          try {
-            await videoRef.current.play();
-          } catch (error) {
-            console.error("Video play hatası:", error);
-          }
-
-          setCameraReady(true);
-          setStatus("Hazır! Tek yumruk = gökkuşağı, iki yumruk = yıldızlar ✨");
-          detectLoop();
-        };
-      } catch (error) {
-        console.error(error);
-        setStatus(getCameraErrorMessage(error));
-      }
-    }
-
-    function detectLoop() {
-      const video = videoRef.current;
-      const landmarker = handLandmarkerRef.current;
-
-      if (video && landmarker && video.readyState >= 2) {
-        const result = landmarker.detectForVideo(video, performance.now());
-
-        if (result.landmarks && result.landmarks.length > 0) {
-          const hands = result.landmarks;
-
-          const detectedFists = hands.filter((hand) => detectFist(hand)).length;
-          setFistCount(detectedFists);
-
-          setHandPosition(getHandPosition(hands[0]));
-
-          if (detectedFists >= 2) {
-            setStatus("İki yumruk algılandı! Gökkuşağı + yıldızlar aktif ✨🌈");
-          } else if (detectedFists === 1) {
-            setStatus("Bir yumruk algılandı! Gökkuşağı aktif 🌈");
-          } else {
-            setStatus("Elini yumruk yaparsan gökkuşağı çıkacak 🌈");
-          }
-        } else {
-          setFistCount(0);
-          setStatus("Elini kameraya göster.");
-        }
-      }
-
-      animationRef.current = requestAnimationFrame(detectLoop);
-    }
-
-    setup();
-
     return () => {
-      isMounted = false;
-
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
 
-      const stream = videoRef.current?.srcObject;
-
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
   }, []);
@@ -372,16 +360,25 @@ export default function App() {
       <div className="hud">
         <h1>Unicorn Gesture AR</h1>
         <p>{status}</p>
+
         <div className={fistCount > 0 ? "badge active" : "badge"}>
           {fistCount >= 2
             ? "2 yumruk algılandı ✨🌈"
             : fistCount === 1
             ? "1 yumruk algılandı 🌈"
-            : "El bekleniyor ✋"}
+            : cameraReady
+            ? "El bekleniyor ✋"
+            : "Kamera kapalı"}
         </div>
+
+        {!cameraReady && (
+          <button className="start-button" onClick={startCamera} disabled={isStarting}>
+            {isStarting ? "Başlatılıyor..." : "Kamerayı Başlat"}
+          </button>
+        )}
       </div>
 
-      {!cameraReady && <div className="loading">Kamera yükleniyor...</div>}
+      {!cameraReady && started && <div className="loading">Kamera yükleniyor...</div>}
     </main>
   );
 }
