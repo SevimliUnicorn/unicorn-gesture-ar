@@ -7,7 +7,11 @@ import {
   useAnimations,
   useGLTF,
 } from "@react-three/drei";
-import { HandLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
+import {
+  HandLandmarker,
+  FaceLandmarker,
+  FilesetResolver,
+} from "@mediapipe/tasks-vision";
 import * as THREE from "three";
 import "./App.css";
 
@@ -205,9 +209,13 @@ function Scene({ fistCount, handPosition, isPointing, unicornRotation }) {
 export default function App() {
   const videoRef = useRef(null);
   const handLandmarkerRef = useRef(null);
+  const faceLandmarkerRef = useRef(null);
   const animationRef = useRef(null);
   const streamRef = useRef(null);
   const previousPointAngleRef = useRef(null);
+  const eyesClosedStartRef = useRef(null);
+  const alarmIntervalRef = useRef(null);
+  const alarmAudioRef = useRef(null);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
@@ -217,6 +225,10 @@ export default function App() {
   const [unicornRotation, setUnicornRotation] = useState(0);
   const [handPosition, setHandPosition] = useState({ x: 0, y: 0 });
   const [status, setStatus] = useState("Başlamak için kamerayı aç.");
+
+  const [sleepProgress, setSleepProgress] = useState(0);
+  const [eyesClosed, setEyesClosed] = useState(false);
+  const [alarmActive, setAlarmActive] = useState(false);
 
   function detectFist(landmarks) {
     if (!landmarks) return false;
@@ -266,7 +278,6 @@ export default function App() {
     const wrist = landmarks[0];
     const indexTip = landmarks[8];
 
-    // Kamera görüntüsü aynalı olduğu için X koordinatını tersliyoruz.
     const wristX = 1 - wrist.x;
     const indexX = 1 - indexTip.x;
 
@@ -301,8 +312,93 @@ export default function App() {
 
     previousPointAngleRef.current = currentAngle;
 
-    // Eğer yön ters gelirse buradaki + işaretini - yaparız.
     setUnicornRotation((prev) => prev + delta * 1.6);
+  }
+
+  function detectEyesClosed(faceResult) {
+    const blendshapes = faceResult?.faceBlendshapes?.[0]?.categories;
+
+    if (!blendshapes) return false;
+
+    const leftBlink =
+      blendshapes.find((item) => item.categoryName === "eyeBlinkLeft")?.score ||
+      0;
+
+    const rightBlink =
+      blendshapes.find((item) => item.categoryName === "eyeBlinkRight")
+        ?.score || 0;
+
+    return leftBlink > 0.45 && rightBlink > 0.45;
+  }
+
+  function startAlarm() {
+    setAlarmActive(true);
+
+    if (alarmAudioRef.current) {
+      alarmAudioRef.current.currentTime = 0;
+      alarmAudioRef.current
+        .play()
+        .catch((error) => console.error("Alarm MP3 çalınamadı:", error));
+    }
+
+    if (navigator.vibrate) {
+      navigator.vibrate([300, 150, 300, 150, 500]);
+    }
+
+    if (!alarmIntervalRef.current) {
+      alarmIntervalRef.current = setInterval(() => {
+        if (navigator.vibrate) {
+          navigator.vibrate([250, 120, 250]);
+        }
+      }, 900);
+    }
+  }
+
+  function stopAlarm() {
+    setAlarmActive(false);
+
+    if (alarmAudioRef.current) {
+      alarmAudioRef.current.pause();
+      alarmAudioRef.current.currentTime = 0;
+    }
+
+    if (alarmIntervalRef.current) {
+      clearInterval(alarmIntervalRef.current);
+      alarmIntervalRef.current = null;
+    }
+
+    if (navigator.vibrate) {
+      navigator.vibrate(0);
+    }
+
+    setSleepProgress(0);
+  }
+
+  function updateSleepSensor(faceResult) {
+    const closed = detectEyesClosed(faceResult);
+    setEyesClosed(closed);
+
+    if (!closed) {
+      eyesClosedStartRef.current = null;
+      setSleepProgress(0);
+      stopAlarm();
+      return;
+    }
+
+    const now = performance.now();
+
+    if (!eyesClosedStartRef.current) {
+      eyesClosedStartRef.current = now;
+    }
+
+    const elapsed = now - eyesClosedStartRef.current;
+    const progress = Math.min((elapsed / 5000) * 100, 100);
+
+    setSleepProgress(progress);
+
+    if (elapsed >= 5000 && !alarmIntervalRef.current) {
+      startAlarm();
+    }
   }
 
   function getCameraErrorMessage(error) {
@@ -335,6 +431,11 @@ export default function App() {
       setStarted(true);
       setStatus("Kamera izni bekleniyor...");
 
+      alarmAudioRef.current = new Audio("/sounds/alarm.mp3");
+      alarmAudioRef.current.loop = true;
+      alarmAudioRef.current.volume = 0.85;
+      alarmAudioRef.current.load();
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "user",
@@ -353,7 +454,7 @@ export default function App() {
       await videoRef.current.play();
 
       setCameraReady(true);
-      setStatus("Kamera açıldı. El algılama modeli yükleniyor...");
+      setStatus("Kamera açıldı. Algılama modelleri yükleniyor...");
 
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
@@ -372,7 +473,21 @@ export default function App() {
         }
       );
 
-      setStatus("Hazır! İşaret parmağınla koştur, yumrukla efekt çıkar ✨");
+      faceLandmarkerRef.current = await FaceLandmarker.createFromOptions(
+        vision,
+        {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          numFaces: 1,
+          outputFaceBlendshapes: true,
+        }
+      );
+
+      setStatus("Hazır! İşaret parmağınla koştur, gözünü kapatma 😴");
 
       detectLoop();
     } catch (error) {
@@ -387,9 +502,17 @@ export default function App() {
   function detectLoop() {
     const video = videoRef.current;
     const landmarker = handLandmarkerRef.current;
+    const faceLandmarker = faceLandmarkerRef.current;
 
     if (video && landmarker && video.readyState >= 2) {
-      const result = landmarker.detectForVideo(video, performance.now());
+      const now = performance.now();
+
+      const result = landmarker.detectForVideo(video, now);
+
+      if (faceLandmarker) {
+        const faceResult = faceLandmarker.detectForVideo(video, now);
+        updateSleepSensor(faceResult);
+      }
 
       if (result.landmarks && result.landmarks.length > 0) {
         const hands = result.landmarks;
@@ -411,6 +534,8 @@ export default function App() {
           setStatus("Bir yumruk algılandı! Gökkuşağı aktif 🌈");
         } else if (detectedPointing) {
           setStatus("İşaret parmağı algılandı! Unicorn koşuyor ve dönüyor 🦄💨");
+        } else if (eyesClosed) {
+          setStatus("Gözler kapalı algılandı 😴");
         } else {
           setStatus("İşaret parmağını kaldırırsan unicorn koşacak 🦄");
         }
@@ -418,7 +543,10 @@ export default function App() {
         setFistCount(0);
         setIsPointing(false);
         previousPointAngleRef.current = null;
-        setStatus("Elini kameraya göster.");
+
+        if (!eyesClosed) {
+          setStatus("Elini kameraya göster.");
+        }
       }
     }
 
@@ -434,11 +562,24 @@ export default function App() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
+
+      if (alarmAudioRef.current) {
+        alarmAudioRef.current.pause();
+        alarmAudioRef.current.currentTime = 0;
+      }
+
+      if (alarmIntervalRef.current) {
+        clearInterval(alarmIntervalRef.current);
+      }
+
+      if (navigator.vibrate) {
+        navigator.vibrate(0);
+      }
     };
   }, []);
 
   return (
-    <main className="app">
+    <main className={alarmActive ? "app alarm-flash" : "app"}>
       <video
         ref={videoRef}
         className="camera"
@@ -482,6 +623,32 @@ export default function App() {
           </button>
         )}
       </div>
+
+{cameraReady && (sleepProgress >= 40 || alarmActive) && (
+  <div className="sleep-panel">
+    <div className="sleep-title">
+      {alarmActive
+        ? "Uyan! Gözlerin 5 saniyedir kapalı 🚨"
+        : "Gözler kapalı algılandı 😴"}
+    </div>
+
+    <div className="sleep-bar">
+      <div
+        className="sleep-bar-fill"
+        style={{ width: `${sleepProgress}%` }}
+      />
+    </div>
+
+    <div className="sleep-counter">
+      {alarmActive
+        ? "Alarm aktif"
+        : `${Math.max(
+            0,
+            Math.ceil((5000 - (sleepProgress / 100) * 5000) / 1000)
+          )} sn`}
+    </div>
+  </div>
+)}
 
       {!cameraReady && started && (
         <div className="loading">Kamera yükleniyor...</div>
