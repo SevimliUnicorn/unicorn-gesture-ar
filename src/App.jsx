@@ -243,7 +243,7 @@ export default function App() {
       return "Kamera başka bir uygulama tarafından kullanılıyor olabilir.";
     }
 
-    return "Kamera açılamadı. Safari kamera iznini ve bağlantının HTTPS olduğunu kontrol et.";
+   return `Kamera açılamadı: ${error?.name || "Bilinmeyen hata"} - ${error?.message || ""}`;
   }
 
   async function startCamera() {
