@@ -1,68 +1,77 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Environment, Float, OrbitControls } from "@react-three/drei";
+import {
+  Environment,
+  Float,
+  OrbitControls,
+  useAnimations,
+  useGLTF,
+} from "@react-three/drei";
 import { HandLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import * as THREE from "three";
 import "./App.css";
 
-function Unicorn({ fistCount, handPosition }) {
-  const scale = fistCount >= 1 ? 1.2 : 1;
+function Unicorn({ fistCount, handPosition, isPointing, unicornRotation }) {
+  const groupRef = useRef();
+  const { scene, animations } = useGLTF("/models/unicorn.glb");
+  const { actions, names } = useAnimations(animations, groupRef);
+
+  const scale = fistCount >= 1 ? 0.18 : 0.15;
+
+  useEffect(() => {
+    if (!names.length) return;
+
+    console.log("Unicorn animations:", names);
+
+    const runAnimation =
+      actions["Run"] ||
+      actions["Running"] ||
+      actions["Walk"] ||
+      actions["Walking"] ||
+      actions[names[0]];
+
+    if (!runAnimation) return;
+
+    if (isPointing) {
+      runAnimation.reset().fadeIn(0.2).play();
+    } else {
+      runAnimation.fadeOut(0.2);
+
+      const stopTimer = setTimeout(() => {
+        runAnimation.stop();
+      }, 220);
+
+      return () => clearTimeout(stopTimer);
+    }
+  }, [actions, names, isPointing]);
 
   return (
-    <Float speed={2} rotationIntensity={0.6} floatIntensity={1.2}>
-      <group position={[handPosition.x, handPosition.y, 0]} scale={scale}>
-        <mesh position={[0, 0, 0]}>
-          <sphereGeometry args={[0.8, 32, 32]} />
-          <meshStandardMaterial color="#ffffff" roughness={0.35} />
-        </mesh>
-
-        <mesh position={[0.85, 0.55, 0]}>
-          <sphereGeometry args={[0.42, 32, 32]} />
-          <meshStandardMaterial color="#fff7ff" roughness={0.35} />
-        </mesh>
-
-        <mesh position={[1.08, 1.0, 0]} rotation={[0, 0, -0.45]}>
-          <coneGeometry args={[0.14, 0.6, 32]} />
-          <meshStandardMaterial color="#ffd700" metalness={0.4} roughness={0.2} />
-        </mesh>
-
-        <mesh position={[0.6, 0.95, 0.22]} rotation={[0.2, 0, 0.5]}>
-          <coneGeometry args={[0.12, 0.32, 24]} />
-          <meshStandardMaterial color="#ffb6d9" />
-        </mesh>
-
-        <mesh position={[0.6, 0.95, -0.22]} rotation={[-0.2, 0, 0.5]}>
-          <coneGeometry args={[0.12, 0.32, 24]} />
-          <meshStandardMaterial color="#ffb6d9" />
-        </mesh>
-
-        {[-0.38, 0.38].map((z) =>
-          [-0.35, 0.35].map((x) => (
-            <mesh key={`${x}-${z}`} position={[x, -0.75, z]}>
-              <cylinderGeometry args={[0.11, 0.13, 0.75, 24]} />
-              <meshStandardMaterial color="#ffffff" />
-            </mesh>
-          ))
-        )}
-
-        <mesh position={[-0.78, 0.15, 0]} rotation={[0, 0, 1.2]}>
-          <coneGeometry args={[0.2, 0.7, 32]} />
-          <meshStandardMaterial color="#ff78d2" />
-        </mesh>
-
-        <mesh position={[1.19, 0.62, 0.18]}>
-          <sphereGeometry args={[0.045, 16, 16]} />
-          <meshStandardMaterial color="#111111" />
-        </mesh>
+    <Float speed={2.2} rotationIntensity={0.25} floatIntensity={0.45}>
+      <group
+        ref={groupRef}
+        position={[handPosition.x, handPosition.y - 0.05, 0]}
+        scale={[scale, scale, scale]}
+        rotation={[0, Math.PI / 2 + unicornRotation, 0]}
+      >
+        <primitive object={scene} position={[0, -1.2, 0]} />
       </group>
     </Float>
   );
 }
 
+useGLTF.preload("/models/unicorn.glb");
+
 function RainbowEffect({ active, handPosition }) {
   if (!active) return null;
 
-  const colors = ["#ff3b3b", "#ff9f1c", "#ffea00", "#4ade80", "#38bdf8", "#8b5cf6"];
+  const colors = [
+    "#ff3b3b",
+    "#ff9f1c",
+    "#ffea00",
+    "#4ade80",
+    "#38bdf8",
+    "#8b5cf6",
+  ];
 
   return (
     <group position={[handPosition.x, handPosition.y - 0.15, -0.4]}>
@@ -74,7 +83,11 @@ function RainbowEffect({ active, handPosition }) {
           scale={[1 + index * 0.08, 1 + index * 0.08, 1]}
         >
           <torusGeometry args={[1.05, 0.025, 12, 80, Math.PI]} />
-          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.2} />
+          <meshStandardMaterial
+            color={color}
+            emissive={color}
+            emissiveIntensity={1.2}
+          />
         </mesh>
       ))}
     </group>
@@ -164,14 +177,23 @@ function StarsEffect({ active, handPosition }) {
   );
 }
 
-function Scene({ fistCount, handPosition }) {
+function Scene({ fistCount, handPosition, isPointing, unicornRotation }) {
   return (
     <Canvas camera={{ position: [0, 1.2, 5], fov: 45 }}>
-      <ambientLight intensity={1.2} />
-      <directionalLight position={[3, 4, 5]} intensity={2} />
+      <ambientLight intensity={1.5} />
+      <directionalLight position={[3, 4, 5]} intensity={2.4} />
+      <directionalLight position={[-3, 2, 3]} intensity={0.7} />
       <Environment preset="sunset" />
 
-      <Unicorn fistCount={fistCount} handPosition={handPosition} />
+      <Suspense fallback={null}>
+        <Unicorn
+          fistCount={fistCount}
+          handPosition={handPosition}
+          isPointing={isPointing}
+          unicornRotation={unicornRotation}
+        />
+      </Suspense>
+
       <RainbowEffect active={fistCount >= 1} handPosition={handPosition} />
       <StarsEffect active={fistCount >= 2} handPosition={handPosition} />
 
@@ -185,11 +207,14 @@ export default function App() {
   const handLandmarkerRef = useRef(null);
   const animationRef = useRef(null);
   const streamRef = useRef(null);
+  const previousPointAngleRef = useRef(null);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [started, setStarted] = useState(false);
   const [fistCount, setFistCount] = useState(0);
+  const [isPointing, setIsPointing] = useState(false);
+  const [unicornRotation, setUnicornRotation] = useState(0);
   const [handPosition, setHandPosition] = useState({ x: 0, y: 0 });
   const [status, setStatus] = useState("Başlamak için kamerayı aç.");
 
@@ -214,14 +239,20 @@ export default function App() {
     return foldedCount >= 3;
   }
 
+  function detectIndexPointing(landmarks) {
+    if (!landmarks) return false;
+
+    const indexUp = landmarks[8].y < landmarks[6].y;
+    const middleFolded = landmarks[12].y > landmarks[10].y;
+    const ringFolded = landmarks[16].y > landmarks[14].y;
+    const pinkyFolded = landmarks[20].y > landmarks[18].y;
+
+    return indexUp && middleFolded && ringFolded && pinkyFolded;
+  }
+
   function getHandPosition(landmarks) {
     const wrist = landmarks[0];
 
-    /*
-      Kamerayı CSS'te scaleX(-1) ile aynalı gösteriyoruz.
-      Bu yüzden MediaPipe'ın X koordinatını ters çeviriyoruz.
-      Böylece el sola gidince unicorn da sola gider.
-    */
     const x = -(wrist.x - 0.5) * 4.2;
     const y = -(wrist.y - 0.5) * 2.8;
 
@@ -229,6 +260,49 @@ export default function App() {
       x: Math.max(-2.1, Math.min(2.1, x)),
       y: Math.max(-1.3, Math.min(1.3, y)),
     };
+  }
+
+  function getPointingAngle(landmarks) {
+    const wrist = landmarks[0];
+    const indexTip = landmarks[8];
+
+    // Kamera görüntüsü aynalı olduğu için X koordinatını tersliyoruz.
+    const wristX = 1 - wrist.x;
+    const indexX = 1 - indexTip.x;
+
+    const dx = indexX - wristX;
+    const dy = indexTip.y - wrist.y;
+
+    return Math.atan2(dy, dx);
+  }
+
+  function normalizeAngleDelta(delta) {
+    if (delta > Math.PI) return delta - Math.PI * 2;
+    if (delta < -Math.PI) return delta + Math.PI * 2;
+    return delta;
+  }
+
+  function updateUnicornRotationFromFinger(landmarks, pointing) {
+    if (!pointing) {
+      previousPointAngleRef.current = null;
+      return;
+    }
+
+    const currentAngle = getPointingAngle(landmarks);
+
+    if (previousPointAngleRef.current === null) {
+      previousPointAngleRef.current = currentAngle;
+      return;
+    }
+
+    const delta = normalizeAngleDelta(
+      currentAngle - previousPointAngleRef.current
+    );
+
+    previousPointAngleRef.current = currentAngle;
+
+    // Eğer yön ters gelirse buradaki + işaretini - yaparız.
+    setUnicornRotation((prev) => prev + delta * 1.6);
   }
 
   function getCameraErrorMessage(error) {
@@ -248,7 +322,9 @@ export default function App() {
       return "Kamera başka bir uygulama tarafından kullanılıyor olabilir.";
     }
 
-    return `Kamera açılamadı: ${error?.name || "Bilinmeyen hata"} - ${error?.message || ""}`;
+    return `Kamera açılamadı: ${error?.name || "Bilinmeyen hata"} - ${
+      error?.message || ""
+    }`;
   }
 
   async function startCamera() {
@@ -283,17 +359,20 @@ export default function App() {
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
       );
 
-      handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "GPU",
-        },
-        runningMode: "VIDEO",
-        numHands: 2,
-      });
+      handLandmarkerRef.current = await HandLandmarker.createFromOptions(
+        vision,
+        {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          numHands: 2,
+        }
+      );
 
-      setStatus("Hazır! Tek yumruk = gökkuşağı, iki yumruk = yıldızlar ✨");
+      setStatus("Hazır! İşaret parmağınla koştur, yumrukla efekt çıkar ✨");
 
       detectLoop();
     } catch (error) {
@@ -316,19 +395,29 @@ export default function App() {
         const hands = result.landmarks;
 
         const detectedFists = hands.filter((hand) => detectFist(hand)).length;
-        setFistCount(detectedFists);
+        const detectedPointing = hands.some((hand) =>
+          detectIndexPointing(hand)
+        );
 
+        setFistCount(detectedFists);
+        setIsPointing(detectedPointing);
         setHandPosition(getHandPosition(hands[0]));
+
+        updateUnicornRotationFromFinger(hands[0], detectedPointing);
 
         if (detectedFists >= 2) {
           setStatus("İki yumruk algılandı! Gökkuşağı + yıldızlar aktif ✨🌈");
         } else if (detectedFists === 1) {
           setStatus("Bir yumruk algılandı! Gökkuşağı aktif 🌈");
+        } else if (detectedPointing) {
+          setStatus("İşaret parmağı algılandı! Unicorn koşuyor ve dönüyor 🦄💨");
         } else {
-          setStatus("Elini yumruk yaparsan gökkuşağı çıkacak 🌈");
+          setStatus("İşaret parmağını kaldırırsan unicorn koşacak 🦄");
         }
       } else {
         setFistCount(0);
+        setIsPointing(false);
+        previousPointAngleRef.current = null;
         setStatus("Elini kameraya göster.");
       }
     }
@@ -359,31 +448,44 @@ export default function App() {
       />
 
       <div className="scene-layer">
-        <Scene fistCount={fistCount} handPosition={handPosition} />
+        <Scene
+          fistCount={fistCount}
+          handPosition={handPosition}
+          isPointing={isPointing}
+          unicornRotation={unicornRotation}
+        />
       </div>
 
       <div className="hud">
         <h1>Unicorn Gesture AR</h1>
         <p>{status}</p>
 
-        <div className={fistCount > 0 ? "badge active" : "badge"}>
+        <div className={fistCount > 0 || isPointing ? "badge active" : "badge"}>
           {fistCount >= 2
             ? "2 yumruk algılandı ✨🌈"
             : fistCount === 1
             ? "1 yumruk algılandı 🌈"
+            : isPointing
+            ? "Unicorn koşuyor 🦄💨"
             : cameraReady
             ? "El bekleniyor ✋"
             : "Kamera kapalı"}
         </div>
 
         {!cameraReady && (
-          <button className="start-button" onClick={startCamera} disabled={isStarting}>
+          <button
+            className="start-button"
+            onClick={startCamera}
+            disabled={isStarting}
+          >
             {isStarting ? "Başlatılıyor..." : "Kamerayı Başlat"}
           </button>
         )}
       </div>
 
-      {!cameraReady && started && <div className="loading">Kamera yükleniyor...</div>}
+      {!cameraReady && started && (
+        <div className="loading">Kamera yükleniyor...</div>
+      )}
     </main>
   );
 }
