@@ -217,7 +217,12 @@ export default function App() {
   function getHandPosition(landmarks) {
     const wrist = landmarks[0];
 
-    const x = (wrist.x - 0.5) * 4.2;
+    /*
+      Kamerayı CSS'te scaleX(-1) ile aynalı gösteriyoruz.
+      Bu yüzden MediaPipe'ın X koordinatını ters çeviriyoruz.
+      Böylece el sola gidince unicorn da sola gider.
+    */
+    const x = -(wrist.x - 0.5) * 4.2;
     const y = -(wrist.y - 0.5) * 2.8;
 
     return {
@@ -243,72 +248,62 @@ export default function App() {
       return "Kamera başka bir uygulama tarafından kullanılıyor olabilir.";
     }
 
-   return `Kamera açılamadı: ${error?.name || "Bilinmeyen hata"} - ${error?.message || ""}`;
+    return `Kamera açılamadı: ${error?.name || "Bilinmeyen hata"} - ${error?.message || ""}`;
   }
 
-async function startCamera() {
-  if (isStarting || cameraReady) return;
+  async function startCamera() {
+    if (isStarting || cameraReady) return;
 
-  try {
-    setIsStarting(true);
-    setStarted(true);
-    setStatus("Kamera izni bekleniyor...");
+    try {
+      setIsStarting(true);
+      setStarted(true);
+      setStatus("Kamera izni bekleniyor...");
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: "user",
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
-      audio: false,
-    });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
 
-    streamRef.current = stream;
+      streamRef.current = stream;
 
-    if (!videoRef.current) return;
+      if (!videoRef.current) return;
 
-    videoRef.current.srcObject = stream;
+      videoRef.current.srcObject = stream;
 
-    await videoRef.current.play();
+      await videoRef.current.play();
 
-    setCameraReady(true);
-    setStatus("Kamera açıldı. El algılama modeli yükleniyor...");
+      setCameraReady(true);
+      setStatus("Kamera açıldı. El algılama modeli yükleniyor...");
 
-    const vision = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-    );
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
 
-    handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath:
-          "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-        delegate: "GPU",
-      },
-      runningMode: "VIDEO",
-      numHands: 2,
-    });
+      handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+      });
 
-    setStatus("Hazır! Tek yumruk = gökkuşağı, iki yumruk = yıldızlar ✨");
+      setStatus("Hazır! Tek yumruk = gökkuşağı, iki yumruk = yıldızlar ✨");
 
-    detectLoop();
-  } catch (error) {
-    console.error(error);
-
-    if (error?.name === "NotAllowedError") {
-      setStatus("Kamera izni reddedildi. Tarayıcı kamera iznini aç.");
-    } else if (error?.name === "NotFoundError") {
-      setStatus("Kamera bulunamadı.");
-    } else if (error?.name === "NotReadableError") {
-      setStatus("Kamera başka bir sekme veya uygulama tarafından kullanılıyor olabilir.");
-    } else {
-      setStatus(`Hata: ${error?.name || "Bilinmeyen hata"} - ${error?.message || ""}`);
+      detectLoop();
+    } catch (error) {
+      console.error(error);
+      setStatus(getCameraErrorMessage(error));
+      setStarted(false);
+    } finally {
+      setIsStarting(false);
     }
-
-    setStarted(false);
-  } finally {
-    setIsStarting(false);
   }
-}
 
   function detectLoop() {
     const video = videoRef.current;
