@@ -245,3 +245,127 @@ body,
     bottom: 20px;
   }
 }
+
+.recognition-canvas {
+  display: none;
+}
+
+.friend-card {
+  position: absolute;
+  left: 50%;
+  top: 92px;
+  transform: translateX(-50%);
+  z-index: 35;
+  width: min(440px, calc(100vw - 32px));
+  padding: 18px 20px;
+  border-radius: 24px;
+  text-align: center;
+  color: white;
+  background: rgba(12, 10, 28, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.35);
+  animation: friendPop 0.45s ease both;
+}
+
+.friend-card-name {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  margin-bottom: 6px;
+}
+
+.friend-card-message {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.friend-effect {
+  position: absolute;
+  inset: 0;
+  z-index: 34;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.friend-effect span {
+  position: absolute;
+  bottom: -40px;
+  font-size: 34px;
+  animation: friendFloat 4s ease-in forwards;
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.35));
+}
+
+@keyframes friendPop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-14px) scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+@keyframes friendFloat {
+  0% {
+    transform: translateY(0) rotate(0deg) scale(0.8);
+    opacity: 0;
+  }
+
+  15% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(-110vh) rotate(18deg) scale(1.25);
+    opacity: 0;
+  }
+}
+
+.floating-start-button {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 40;
+  width: min(360px, calc(100vw - 40px));
+  border: none;
+  border-radius: 999px;
+  padding: 14px 18px;
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+  color: #080810;
+  background: linear-gradient(
+    90deg,
+    #ff3b3b,
+    #ff9f1c,
+    #ffea00,
+    #4ade80,
+    #38bdf8,
+    #8b5cf6
+  );
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.35);
+}
+
+.floating-start-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (max-width: 600px) {
+  .friend-card {
+    top: 110px;
+  }
+
+  .friend-card-name {
+    font-size: 23px;
+  }
+
+  .friend-card-message {
+    font-size: 15px;
+  }
+}

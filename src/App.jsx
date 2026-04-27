@@ -13,9 +13,51 @@ import {
   FilesetResolver,
 } from "@mediapipe/tasks-vision";
 import * as THREE from "three";
+import * as faceapi from "face-api.js";
 import "./App.css";
 
-function Unicorn({ fistCount, handPosition, isPointing, unicornRotation }) {
+const FRIENDS = [
+  {
+    id: "seyma",
+    name: "Şeyma",
+    images: [
+      "/faces/seyma/1.jpg",
+      "/faces/seyma/2.jpg",
+      "/faces/seyma/3.jpg",
+    ],
+    song: "/sounds/seyma.mp3",
+    message: "Şeyma sahneye giriş yaptı ✨👑",
+    effect: "hearts",
+  },
+  {
+    id: "onur",
+    name: "Onur",
+    images: ["/faces/onur/1.jpg", "/faces/onur/2.jpg", "/faces/onur/3.jpg"],
+    song: "/sounds/onur.mp3",
+    message: "Onur hoş geldin 😎",
+    effect: "hearts",
+  },
+  {
+    id: "furkan",
+    name: "Furkan",
+    images: [
+      "/faces/furkan/1.jpg",
+      "/faces/furkan/2.jpg",
+      "/faces/furkan/3.jpg",
+    ],
+    song: "/sounds/furkan.mp3",
+    message: "Furkan geldi 🦄",
+    effect: "sparkles",
+  },
+];
+
+function Unicorn({
+  fistCount,
+  handPosition,
+  isPointing,
+  unicornRotation,
+  hideUnicorn,
+}) {
   const groupRef = useRef();
   const { scene, animations } = useGLTF("/models/unicorn.glb");
   const { actions, names } = useAnimations(animations, groupRef);
@@ -24,8 +66,6 @@ function Unicorn({ fistCount, handPosition, isPointing, unicornRotation }) {
 
   useEffect(() => {
     if (!names.length) return;
-
-    console.log("Unicorn animations:", names);
 
     const runAnimation =
       actions["Run"] ||
@@ -36,7 +76,7 @@ function Unicorn({ fistCount, handPosition, isPointing, unicornRotation }) {
 
     if (!runAnimation) return;
 
-    if (isPointing) {
+    if (isPointing && !hideUnicorn) {
       runAnimation.reset().fadeIn(0.2).play();
     } else {
       runAnimation.fadeOut(0.2);
@@ -47,7 +87,9 @@ function Unicorn({ fistCount, handPosition, isPointing, unicornRotation }) {
 
       return () => clearTimeout(stopTimer);
     }
-  }, [actions, names, isPointing]);
+  }, [actions, names, isPointing, hideUnicorn]);
+
+  if (hideUnicorn) return null;
 
   return (
     <Float speed={2.2} rotationIntensity={0.25} floatIntensity={0.45}>
@@ -181,7 +223,38 @@ function StarsEffect({ active, handPosition }) {
   );
 }
 
-function Scene({ fistCount, handPosition, isPointing, unicornRotation }) {
+function FriendEffect({ friend }) {
+  if (!friend) return null;
+
+  const emojis =
+    friend.effect === "hearts"
+      ? ["💖", "💘", "💗", "💕", "💞", "✨"]
+      : ["✨", "⭐", "🌟", "🦄", "💫", "🎉"];
+
+  return (
+    <div className="friend-effect">
+      {emojis.map((emoji, index) => (
+        <span
+          key={`${emoji}-${index}`}
+          style={{
+            left: `${12 + index * 15}%`,
+            animationDelay: `${index * 0.18}s`,
+          }}
+        >
+          {emoji}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function Scene({
+  fistCount,
+  handPosition,
+  isPointing,
+  unicornRotation,
+  hideUnicorn,
+}) {
   return (
     <Canvas camera={{ position: [0, 1.2, 5], fov: 45 }}>
       <ambientLight intensity={1.5} />
@@ -195,6 +268,7 @@ function Scene({ fistCount, handPosition, isPointing, unicornRotation }) {
           handPosition={handPosition}
           isPointing={isPointing}
           unicornRotation={unicornRotation}
+          hideUnicorn={hideUnicorn}
         />
       </Suspense>
 
@@ -208,14 +282,25 @@ function Scene({ fistCount, handPosition, isPointing, unicornRotation }) {
 
 export default function App() {
   const videoRef = useRef(null);
+  const recognitionCanvasRef = useRef(null);
+
   const handLandmarkerRef = useRef(null);
   const faceLandmarkerRef = useRef(null);
   const animationRef = useRef(null);
   const streamRef = useRef(null);
+
   const previousPointAngleRef = useRef(null);
   const eyesClosedStartRef = useRef(null);
   const alarmIntervalRef = useRef(null);
   const alarmAudioRef = useRef(null);
+
+  const faceMatcherRef = useRef(null);
+  const faceRecognitionReadyRef = useRef(false);
+  const recognitionFrameRef = useRef(0);
+  const lastRecognitionAtRef = useRef(0);
+  const friendAudioRef = useRef(null);
+  const friendMessageTimeoutRef = useRef(null);
+  const currentFriendIdRef = useRef(null);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
@@ -229,6 +314,9 @@ export default function App() {
   const [sleepProgress, setSleepProgress] = useState(0);
   const [eyesClosed, setEyesClosed] = useState(false);
   const [alarmActive, setAlarmActive] = useState(false);
+
+  const [faceRecognitionReady, setFaceRecognitionReady] = useState(false);
+  const [recognizedFriend, setRecognizedFriend] = useState(null);
 
   function detectFist(landmarks) {
     if (!landmarks) return false;
@@ -401,6 +489,164 @@ export default function App() {
     }
   }
 
+  async function loadFaceRecognition() {
+    setStatus("Yüz tanıma modeli yükleniyor...");
+
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri("/models/face-api"),
+      faceapi.nets.faceLandmark68Net.loadFromUri("/models/face-api"),
+      faceapi.nets.faceRecognitionNet.loadFromUri("/models/face-api"),
+    ]);
+
+    const labeledDescriptors = [];
+
+    for (const friend of FRIENDS) {
+      const descriptors = [];
+
+      for (const imageUrl of friend.images) {
+        try {
+          const img = await faceapi.fetchImage(imageUrl);
+          const detection = await faceapi
+            .detectSingleFace(
+              img,
+              new faceapi.TinyFaceDetectorOptions({
+                inputSize: 224,
+                scoreThreshold: 0.45,
+              })
+            )
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+
+          if (detection?.descriptor) {
+            descriptors.push(detection.descriptor);
+            console.log(`${friend.name} referans yüz yüklendi:`, imageUrl);
+          } else {
+            console.warn(`${friend.name} için yüz bulunamadı:`, imageUrl);
+          }
+        } catch (error) {
+          console.error(
+            `${friend.name} fotoğrafı yüklenemedi:`,
+            imageUrl,
+            error
+          );
+        }
+      }
+
+      if (descriptors.length > 0) {
+        labeledDescriptors.push(
+          new faceapi.LabeledFaceDescriptors(friend.id, descriptors)
+        );
+      }
+    }
+
+    if (labeledDescriptors.length > 0) {
+      faceMatcherRef.current = new faceapi.FaceMatcher(labeledDescriptors, 0.65);
+      faceRecognitionReadyRef.current = true;
+      setFaceRecognitionReady(true);
+
+      console.log(
+        "Yüz tanıma hazır. Yüklenen kişiler:",
+        labeledDescriptors.map((item) => item.label)
+      );
+
+      setStatus("Hazır! Arkadaş tanıma aktif ✨");
+    } else {
+      faceRecognitionReadyRef.current = false;
+      setFaceRecognitionReady(false);
+      setStatus("Yüz tanıma için referans yüz bulunamadı.");
+    }
+  }
+
+  function playFriendSong(friend) {
+    if (!friend) return;
+
+    if (currentFriendIdRef.current === friend.id && friendAudioRef.current) {
+      return;
+    }
+
+    if (friendAudioRef.current) {
+      friendAudioRef.current.pause();
+      friendAudioRef.current.currentTime = 0;
+    }
+
+    currentFriendIdRef.current = friend.id;
+
+    friendAudioRef.current = new Audio(friend.song);
+    friendAudioRef.current.volume = 0.9;
+    friendAudioRef.current
+      .play()
+      .catch((error) => console.error("Arkadaş şarkısı çalınamadı:", error));
+  }
+
+  function showFriendGreeting(friend) {
+    setRecognizedFriend(friend);
+    setStatus(friend.message);
+    playFriendSong(friend);
+
+    if (friendMessageTimeoutRef.current) {
+      clearTimeout(friendMessageTimeoutRef.current);
+    }
+
+    friendMessageTimeoutRef.current = setTimeout(() => {
+      setRecognizedFriend(null);
+    }, 5000);
+  }
+
+  async function runFaceRecognition(video) {
+    if (!faceMatcherRef.current || !recognitionCanvasRef.current) return;
+
+    const now = performance.now();
+
+    if (now - lastRecognitionAtRef.current < 5000) return;
+
+    recognitionFrameRef.current += 1;
+
+    if (recognitionFrameRef.current % 5 !== 0) return;
+
+    const canvas = recognitionCanvasRef.current;
+    const context = canvas.getContext("2d");
+
+    const targetWidth = 320;
+    const ratio = video.videoHeight / video.videoWidth;
+    const targetHeight = Math.round(targetWidth * ratio);
+
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    context.drawImage(video, 0, 0, targetWidth, targetHeight);
+
+    const detection = await faceapi
+      .detectSingleFace(
+        canvas,
+        new faceapi.TinyFaceDetectorOptions({
+          inputSize: 160,
+          scoreThreshold: 0.35,
+        })
+      )
+      .withFaceLandmarks()
+      .withFaceDescriptor();
+
+    if (!detection?.descriptor) {
+      console.log("Kamerada yüz descriptor bulunamadı.");
+      return;
+    }
+
+    const bestMatch = faceMatcherRef.current.findBestMatch(
+      detection.descriptor
+    );
+
+    console.log("Yüz eşleşme sonucu:", bestMatch.toString());
+
+    if (bestMatch.label === "unknown") return;
+
+    const friend = FRIENDS.find((item) => item.id === bestMatch.label);
+
+    if (!friend) return;
+
+    lastRecognitionAtRef.current = now;
+    showFriendGreeting(friend);
+  }
+
   function getCameraErrorMessage(error) {
     if (!window.isSecureContext) {
       return "Kamera için HTTPS gerekiyor. Vercel linkiyle açtığından emin ol.";
@@ -487,7 +733,9 @@ export default function App() {
         }
       );
 
-      setStatus("Hazır! İşaret parmağınla koştur, gözünü kapatma 😴");
+      await loadFaceRecognition();
+
+      setStatus("Hazır! İşaret parmağınla koştur, arkadaş tanıma aktif ✨");
 
       detectLoop();
     } catch (error) {
@@ -514,6 +762,10 @@ export default function App() {
         updateSleepSensor(faceResult);
       }
 
+      if (faceRecognitionReadyRef.current) {
+        runFaceRecognition(video);
+      }
+
       if (result.landmarks && result.landmarks.length > 0) {
         const hands = result.landmarks;
 
@@ -534,6 +786,8 @@ export default function App() {
           setStatus("Bir yumruk algılandı! Gökkuşağı aktif 🌈");
         } else if (detectedPointing) {
           setStatus("İşaret parmağı algılandı! Unicorn koşuyor ve dönüyor 🦄💨");
+        } else if (recognizedFriend) {
+          setStatus(recognizedFriend.message);
         } else if (eyesClosed) {
           setStatus("Gözler kapalı algılandı 😴");
         } else {
@@ -544,7 +798,9 @@ export default function App() {
         setIsPointing(false);
         previousPointAngleRef.current = null;
 
-        if (!eyesClosed) {
+        if (recognizedFriend) {
+          setStatus(recognizedFriend.message);
+        } else if (!eyesClosed) {
           setStatus("Elini kameraya göster.");
         }
       }
@@ -568,8 +824,17 @@ export default function App() {
         alarmAudioRef.current.currentTime = 0;
       }
 
+      if (friendAudioRef.current) {
+        friendAudioRef.current.pause();
+        friendAudioRef.current.currentTime = 0;
+      }
+
       if (alarmIntervalRef.current) {
         clearInterval(alarmIntervalRef.current);
+      }
+
+      if (friendMessageTimeoutRef.current) {
+        clearTimeout(friendMessageTimeoutRef.current);
       }
 
       if (navigator.vibrate) {
@@ -588,12 +853,15 @@ export default function App() {
         autoPlay
       />
 
+      <canvas ref={recognitionCanvasRef} className="recognition-canvas" />
+
       <div className="scene-layer">
         <Scene
           fistCount={fistCount}
           handPosition={handPosition}
           isPointing={isPointing}
           unicornRotation={unicornRotation}
+          hideUnicorn={false}
         />
       </div>
 
@@ -601,57 +869,80 @@ export default function App() {
         <h1>Unicorn Gesture AR</h1>
         <p>{status}</p>
 
-        <div className={fistCount > 0 || isPointing ? "badge active" : "badge"}>
-          {fistCount >= 2
+        <div
+          className={
+            fistCount > 0 || isPointing || recognizedFriend
+              ? "badge active"
+              : "badge"
+          }
+        >
+          {recognizedFriend
+            ? `${recognizedFriend.name} tanındı ✨`
+            : fistCount >= 2
             ? "2 yumruk algılandı ✨🌈"
             : fistCount === 1
             ? "1 yumruk algılandı 🌈"
             : isPointing
             ? "Unicorn koşuyor 🦄💨"
             : cameraReady
-            ? "El bekleniyor ✋"
+            ? faceRecognitionReady
+              ? "Arkadaş tanıma aktif 👀"
+              : "El bekleniyor ✋"
             : "Kamera kapalı"}
         </div>
-
-        {!cameraReady && (
-          <button
-            className="start-button"
-            onClick={startCamera}
-            disabled={isStarting}
-          >
-            {isStarting ? "Başlatılıyor..." : "Kamerayı Başlat"}
-          </button>
-        )}
       </div>
 
-{cameraReady && (sleepProgress >= 40 || alarmActive) && (
-  <div className="sleep-panel">
-    <div className="sleep-title">
-      {alarmActive
-        ? "Uyan! Gözlerin 5 saniyedir kapalı 🚨"
-        : "Gözler kapalı algılandı 😴"}
-    </div>
+      {recognizedFriend && (
+        <>
+          <div className="friend-card">
+            <div className="friend-card-name">{recognizedFriend.name}</div>
+            <div className="friend-card-message">
+              {recognizedFriend.message}
+            </div>
+          </div>
 
-    <div className="sleep-bar">
-      <div
-        className="sleep-bar-fill"
-        style={{ width: `${sleepProgress}%` }}
-      />
-    </div>
+          <FriendEffect friend={recognizedFriend} />
+        </>
+      )}
 
-    <div className="sleep-counter">
-      {alarmActive
-        ? "Alarm aktif"
-        : `${Math.max(
-            0,
-            Math.ceil((5000 - (sleepProgress / 100) * 5000) / 1000)
-          )} sn`}
-    </div>
-  </div>
-)}
+      {cameraReady && (sleepProgress >= 40 || alarmActive) && (
+        <div className="sleep-panel">
+          <div className="sleep-title">
+            {alarmActive
+              ? "Uyan! Gözlerin 5 saniyedir kapalı 🚨"
+              : "Gözler kapalı algılandı 😴"}
+          </div>
+
+          <div className="sleep-bar">
+            <div
+              className="sleep-bar-fill"
+              style={{ width: `${sleepProgress}%` }}
+            />
+          </div>
+
+          <div className="sleep-counter">
+            {alarmActive
+              ? "Alarm aktif"
+              : `${Math.max(
+                  0,
+                  Math.ceil((5000 - (sleepProgress / 100) * 5000) / 1000)
+                )} sn`}
+          </div>
+        </div>
+      )}
 
       {!cameraReady && started && (
         <div className="loading">Kamera yükleniyor...</div>
+      )}
+
+      {!cameraReady && (
+        <button
+          className="floating-start-button"
+          onClick={startCamera}
+          disabled={isStarting}
+        >
+          {isStarting ? "Başlatılıyor..." : "Kamerayı Başlat"}
+        </button>
       )}
     </main>
   );
